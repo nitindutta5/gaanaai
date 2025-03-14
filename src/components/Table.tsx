@@ -4,6 +4,7 @@ import { ApiService } from "@/utils/apiService";
 import { debounce } from "@/utils/helper";
 import { useState, useEffect, useRef, useCallback, JSX, useMemo } from "react";
 import { FaSort, FaSortUp, FaSortDown } from "react-icons/fa";
+import Pagination from "./Pagination";
 
 type Row = {
   id: number;
@@ -19,7 +20,10 @@ type Row = {
   code: string;
 };
 
-type EditableColumns = keyof Pick<Row, 'name' | 'country' | 'city' | 'code'>;
+type EditableColumns = keyof Pick<
+  Row,
+  "name" | "country" | "city" | "code" | "id"
+>;
 
 type DataTableType = {
   apiUrl: string;
@@ -35,7 +39,7 @@ type DataTableType = {
 };
 
 export default function DataTable({ apiUrl, columns }: DataTableType) {
-  const myApiService = useMemo(() => new ApiService(apiUrl),[apiUrl]);
+  const myApiService = useMemo(() => new ApiService(apiUrl), [apiUrl]);
   const totalPages = useRef<number>(0);
   const [data, setData] = useState<Row[]>([]);
   const [edit, setEdit] = useState<any | null>(null);
@@ -47,7 +51,14 @@ export default function DataTable({ apiUrl, columns }: DataTableType) {
     columns.map((col) => col.accessor)
   );
 
-  const selectedKeys = useMemo(() => Object.keys(edit ?? {} as EditableColumns), [edit]);
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+  };
+
+  const selectedKeys = useMemo(
+    () => Object.keys(edit ?? ({} as EditableColumns)),
+    [edit]
+  );
 
   const fetchData = async (query?: string) => {
     try {
@@ -55,15 +66,15 @@ export default function DataTable({ apiUrl, columns }: DataTableType) {
         q: query ?? searchQuery,
         _sort: sortField || "",
         _order: sortOrder,
-        _page: currentPage.toString(),
+        _page: query ? "1" : currentPage.toString(),
         _limit: "10",
       };
-      const response = await myApiService.get<Row[]>("/",params, true);
-      console.log(response,"RES")
-      totalPages.current = response.totalRecords??0  / 10
+      const response = await myApiService.get<Row[]>("", params, true);
+      totalPages.current = Math.floor((response.totalRecords as number) / 10);
       setData(response.data);
     } catch (error) {
       console.error("Error fetching data:", error);
+      alert("Failed to fetch data. Please try again later.");
     }
   };
 
@@ -94,20 +105,60 @@ export default function DataTable({ apiUrl, columns }: DataTableType) {
   };
 
   const handleEdit = (row: Row) => {
-    setEdit({
-      name:row.name,
-      city:row.city,
-      country: row.country,
-      code:row.code
-    });
+    setEdit(row);
   };
-  
+
+  const addUpdate = async () => {
+    let data = { ...edit };
+
+    if (data.coordinates) {
+      data.coordinates = data.coordinates.split(",");
+    }
+
+    try {
+      if (edit.id) {
+        await myApiService.put(`/${edit.id}`, data);
+      } else {
+        await myApiService.post("", data); // Creates a new record
+      }
+
+      fetchData(); // Refresh table
+      setEdit(null);
+    } catch (error) {
+      console.error("Error saving data:", error);
+    }
+  };
+
   const handleDelete = async (id: string) => {
     if (confirm("Are you sure you want to delete this record?")) {
-      await myApiService.delete(`/${id}`)
+      await myApiService.delete(`/${id}`);
       fetchData(); // Refresh the table after deleting
     }
   };
+
+  const handleColumnEdit = (e: any, col: string) => {
+    let val = e.target.value;
+    if (typeof val === "string") {
+      setEdit({ ...edit, [col]: e.target.value });
+    } else if (
+      Array.isArray(edit[col]) &&
+      edit[col].every((item) => typeof item === "string")
+    ) {
+      setEdit({ ...edit, [col]: val.split(",").map((v: any) => v.trim()) }); // Convert comma-separated string to array of strings
+    } else if (
+      Array.isArray(edit[col]) &&
+      edit[col].every((item) => typeof item === "number")
+    ) {
+      setEdit({
+        ...edit,
+        [col]: val.split(",").map((v: any) => Number(v.trim()) || 0),
+      }); // Convert comma-separated string to array of numbers
+    }
+  };
+  const columnsToRender = useMemo(
+    () => columns.filter((col) => visibleColumns.includes(col.accessor)),
+    [columns, visibleColumns]
+  );
 
   return (
     <div className="w-full p-4 shadow-lg rounded-lg bg-gray-100 text-black">
@@ -134,23 +185,38 @@ export default function DataTable({ apiUrl, columns }: DataTableType) {
           </label>
         ))}
       </div>
-
+      <button
+        className="mb-3 px-4 py-2 bg-green-700 text-white rounded-md"
+        onClick={() =>
+          setEdit({
+            name: "",
+            country: "",
+            city: "",
+            code: "",
+            coordinates: "",
+            province: "",
+            timezone: "",
+            id: undefined,
+          })
+        }
+      >
+        Create New
+      </button>
       {/* Table */}
       <div className="overflow-x-auto">
         <table className="min-w-full border rounded-md">
           <thead>
-            <tr className="bg-gray-100 text-black">
-              {columns
-                .filter((col) => visibleColumns.includes(col.accessor))
-                .map((col) => (
-                  <th
-                    key={col.accessor}
-                    onClick={() => handleSort(col.accessor)}
-                    className="px-4 py-2 cursor-pointer"
-                  >
-                    <div className="flex items-center">
-                      {col.label}
-                      {sortField === col.accessor ? (
+            <tr className="bg-gray-100 text-black border-b-2">
+              {columnsToRender.map((col) => (
+                <th
+                  key={col.accessor}
+                  onClick={() => handleSort(col.accessor)}
+                  className="px-4 py-2 cursor-pointer"
+                >
+                  <div className="flex items-center">
+                    {col.label}
+                    {col.accessor !== "actions" ? (
+                      sortField === col.accessor ? (
                         sortOrder === "asc" ? (
                           <FaSortUp className="ml-1" />
                         ) : (
@@ -158,10 +224,11 @@ export default function DataTable({ apiUrl, columns }: DataTableType) {
                         )
                       ) : (
                         <FaSort className="ml-1 text-gray-400 text-black" />
-                      )}
-                    </div>
-                  </th>
-                ))}
+                      )
+                    ) : null}
+                  </div>
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -172,7 +239,6 @@ export default function DataTable({ apiUrl, columns }: DataTableType) {
                     .filter((col) => visibleColumns.includes(col.accessor))
                     .map((col) => (
                       <td key={col.accessor} className="px-4 py-2">
-                        {row[col.accessor as keyof Row]}
                         {col.render
                           ? col.render(row, handleEdit, handleDelete)
                           : row[col.accessor as keyof Row]}
@@ -195,98 +261,49 @@ export default function DataTable({ apiUrl, columns }: DataTableType) {
       </div>
 
       {/* Pagination */}
-      {/* Pagination */}
-      <div className="flex justify-center items-center mt-4 space-x-2">
-        {/* Start Button */}
-        <button
-          className="px-4 py-2 bg-gray-200 text-black rounded-md disabled:opacity-50"
-          onClick={() => setCurrentPage(1)}
-          disabled={currentPage === 1}
-        >
-          Start
-        </button>
-
-        {/* Previous Button */}
-        <button
-          className="px-4 py-2 bg-gray-200 text-black rounded-md disabled:opacity-50"
-          onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-          disabled={currentPage === 1}
-        >
-          Prev
-        </button>
-
-        {/* Page Numbers */}
-        {Array.from({ length: Math.min(5, totalPages.current) }, (_, i) => {
-          const pageNumber = Math.max(1, currentPage - 2) + i;
-          return pageNumber <= totalPages.current ? (
-            <button
-              key={pageNumber}
-              className={`px-3 py-1 rounded-md ${
-                currentPage === pageNumber
-                  ? "bg-blue-500 text-white"
-                  : "bg-gray-200 text-black"
-              }`}
-              onClick={() => setCurrentPage(pageNumber)}
-            >
-              {pageNumber}
-            </button>
-          ) : null;
-        })}
-
-        {/* Next Button */}
-        <button
-          className="px-4 py-2 bg-gray-200 text-black rounded-md disabled:opacity-50"
-          onClick={() =>
-            setCurrentPage((prev) => Math.min(prev + 1, totalPages.current))
-          }
-          disabled={currentPage === totalPages.current}
-        >
-          Next
-        </button>
-
-        {/* End Button */}
-        <button
-          className="px-4 py-2 bg-gray-200 text-black rounded-md disabled:opacity-50"
-          onClick={() => setCurrentPage(totalPages.current)}
-          disabled={currentPage === totalPages.current}
-        >
-          End
-        </button>
-      </div>
-
-      <p className="text-center">
-        Page {currentPage} of {totalPages.current}
-      </p>
+      <Pagination
+        totalPages={totalPages.current}
+        currentPage={currentPage}
+        onPageChange={handlePageChange}
+      />
 
       {edit && (
-        <div className="fixed inset-0 flex items-center justify-center bg-gray-800 bg-opacity-50">
+        <div className="fixed inset-0 flex items-center justify-center bg-gray-800 bg-opacity-50 overflow-auto">
           <div className="bg-white p-6 rounded-md shadow-lg w-1/3">
-            <h2 className="text-xl font-semibold mb-4">Edit Row</h2>
+            <h2 className="text-xl font-semibold mb-4">
+              Edit Row {edit["id"]}
+            </h2>
             <form>
-              {selectedKeys?.map((col) => (
-                <div key={col} className="mb-3">
-                  <label className="block font-medium">{col}</label>
-                  <input
-                    type="text"
-                    name={col}
-                    value={edit[col]}
-                    onChange={(e) => {setEdit({...edit,[col]:e.target.value})}}
-                    className="w-full border px-3 py-2 rounded"
-                  />
-                </div>
-              ))}
+              {selectedKeys?.map((col) =>
+                col === "id" ? null : (
+                  <div key={col} className="mb-3">
+                    <label className="block font-medium">{col}</label>
+                    <input
+                      type="text"
+                      name={col}
+                      value={
+                        Array.isArray(edit[col])
+                          ? edit[col].join(", ")
+                          : edit[col]
+                      }
+                      onChange={(e) => handleColumnEdit(e, col)}
+                      className="w-full border px-3 py-2 rounded"
+                    />
+                  </div>
+                )
+              )}
               <div className="flex justify-end space-x-3 mt-4">
                 <button
                   type="button"
                   className="bg-gray-400 text-white px-4 py-2 rounded"
-                  onClick={()=> setEdit(null)}
+                  onClick={() => setEdit(null)}
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   className="bg-blue-500 text-white px-4 py-2 rounded"
-                  onClick={handleEdit}
+                  onClick={addUpdate}
                 >
                   Save Changes
                 </button>

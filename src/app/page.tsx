@@ -13,8 +13,8 @@ export default function Home() {
       accessor: "actions",
       render: (row: any, handleEdit: (row: any) => void, handleDelete: (id: string) => void) => (
         <div className="flex space-x-2">
-          <button className="text-blue-500" onClick={() => handleEdit(row)}>Edit</button>
-          <button className="text-red-500 border-2" onClick={() => handleDelete(row.id)}>Delete</button>
+          <button className="text-blue-500 p-1" onClick={() => handleEdit(row)}>Edit</button>
+          <button className="text-red-500 border-2 p-1" onClick={() => handleDelete(row.id)}>Delete</button>
         </div>
       ),
     },
